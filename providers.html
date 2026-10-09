@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Providers - Seat-Sync demo</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main id="main">
+  <h1>Providers</h1>
+  <div class="msg info"><strong>Deny by default.</strong> A provider that you have not approved cannot see this center at all: it never appears in their center list or search results.</div>
+  <div id="msg" role="alert" hidden></div>
+  <div class="card">
+    <h2 style="margin-top:0">Add provider</h2>
+    <div class="row">
+      <div><label for="prov">Registered provider</label><select id="prov"></select></div>
+      <div><button type="button" class="btn" id="add">Approve</button></div>
+    </div>
+  </div>
+  <div class="table-wrap"><table>
+    <thead><tr><th>Provider</th><th>Status</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/app.js"></script>
+<script>
+SS.shell({ page: 'providers.html', owner: true });
+var center = SS.currentCenter();
+var msg = document.getElementById('msg');
+
+function render() {
+  var s = SS.load(), all = window.SeatSyncSeed.PROVIDERS;
+  var approved = all.filter(function (p) { return SS.isApproved(s, center.id, p.id); });
+  var pending = all.filter(function (p) { return !SS.isApproved(s, center.id, p.id); });
+  document.getElementById('rows').innerHTML = approved.map(function (p) {
+    return '<tr><td>' + SS.esc(p.name) + '</td><td><span class="pill approved">approved</span></td>' +
+      '<td><button class="btn small danger" data-id="' + p.id + '">Revoke</button></td></tr>';
+  }).join('') || '<tr><td colspan="3" class="muted">No approved providers. Nobody can see this center.</td></tr>';
+  document.getElementById('prov').innerHTML = pending.map(function (p) {
+    return '<option value="' + p.id + '">' + SS.esc(p.name) + '</option>';
+  }).join('') || '<option value="">All providers approved</option>';
+}
+
+document.getElementById('add').addEventListener('click', function () {
+  var id = document.getElementById('prov').value;
+  if (!id) { return; }
+  var s = SS.load();
+  s.approvals.push({ centerId: center.id, providerId: id }); SS.save();
+  SS.flash(msg, SS.provider(id).name + ' approved.', 'ok'); render();
+});
+document.getElementById('rows').addEventListener('click', function (e) {
+  var id = e.target.getAttribute('data-id');
+  if (!id) { return; }
+  var s = SS.load();
+  s.approvals = s.approvals.filter(function (a) { return !(a.centerId === center.id && a.providerId === id); });
+  SS.save();
+  SS.flash(msg, SS.provider(id).name + ' revoked. Existing reservations are kept.', 'warn'); render();
+});
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Availability - Seat-Sync demo</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main id="main">
+  <h1>Availability</h1>
+  <div id="msg" role="alert" hidden></div>
+  <label for="acc">Accommodation</label>
+  <select id="acc"></select>
+
+  <div id="panel" hidden>
+    <div class="card">
+      <h2 style="margin-top:0">Default quantity per day</h2>
+      <div class="row">
+        <div><label for="defqty">Quantity</label><input id="defqty" type="number" min="0" style="width:6rem"></div>
+        <div><button type="button" class="btn" id="savedef">Save default</button></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="margin-top:0">Add exception</h2>
+      <div class="row">
+        <div><label for="xtype">Type</label>
+          <select id="xtype">
+            <option value="date">Single date</option>
+            <option value="range">Date range</option>
+            <option value="weekday">Weekday pattern in a range</option>
+          </select></div>
+        <div><label for="xstart">Start date</label><input id="xstart" type="date"></div>
+        <div id="endwrap"><label for="xend">End date</label><input id="xend" type="date"></div>
+        <div><label for="xqty">Quantity (0 = closed)</label><input id="xqty" type="number" min="0" value="0" style="width:6rem"></div>
+      </div>
+      <fieldset id="dayswrap" hidden style="border:0;padding:0;margin:.75rem 0 0">
+        <legend style="font-weight:600">Weekdays</legend>
+      </fieldset>
+      <p><button type="button" class="btn" id="addx">Add exception</button></p>
+    </div>
+
+    <h2>Exceptions</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Type</th><th>Dates</th><th>Quantity</th><th></th></tr></thead>
+      <tbody id="xrows"></tbody>
+    </table></div>
+
+    <h2>Calendar</h2>
+    <div class="cal-head">
+      <button type="button" class="btn small ghost" id="prev" aria-label="Previous month">&larr;</button>
+      <strong id="mlabel" aria-live="polite"></strong>
+      <button type="button" class="btn small ghost" id="next" aria-label="Next month">&rarr;</button>
+    </div>
+    <div class="cal" id="cal"></div>
+    <p class="muted">Each day: capacity / reserved / remaining.</p>
+  </div>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/app.js"></script>
+<script>
+SS.shell({ page: 'availability.html', owner: true });
+var center = SS.currentCenter();
+var msg = document.getElementById('msg');
+var $ = function (id) { return document.getElementById(id); };
+var month = SS.today().slice(0, 7); // 'YYYY-MM'
+
+// weekday checkboxes
+$('dayswrap').insertAdjacentHTML('beforeend', SS.DAYS.map(function (d, i) {
+  return '<label class="inline-check"><input type="checkbox" class="wd" value="' + i + '"> ' + d + '</label>';
+}).join(''));
+
+function accs() { return SS.centerAccsFor(SS.load(), center.id); }
+function current() { return SS.centerAccById(SS.load(), $('acc').value); }
+
+function fillSelect() {
+  var keep = $('acc').value;
+  $('acc').innerHTML = accs().map(function (c) {
+    return '<option value="' + c.id + '">' + SS.esc(SS.catalogItem(c.code).name) + '</option>';
+  }).join('');
+  if (keep) { $('acc').value = keep; }
+  if (!$('acc').value && $('acc').options.length) { $('acc').selectedIndex = 0; }
+}
+
+function render() {
+  var ca = current();
+  $('panel').hidden = !ca;
+  if (!ca) { SS.flash(msg, 'Add an accommodation first.', 'warn'); return; }
+  $('defqty').value = ca.qty;
+  renderRules(); renderCal();
+}
+
+function describe(r) {
+  if (r.type === 'date') { return SS.prettyDate(r.start); }
+  if (r.type === 'range') { return SS.prettyDate(r.start) + ' to ' + SS.prettyDate(r.end); }
+  return r.days.map(function (d) { return SS.DAYS[d]; }).join(', ') + ' between ' + r.start + ' and ' + r.end;
+}
+function renderRules() {
+  var s = SS.load(), ca = current();
+  var list = s.rules.filter(function (r) { return r.centerAccId === ca.id; });
+  $('xrows').innerHTML = list.map(function (r) {
+    return '<tr><td>' + { date: 'Single date', range: 'Range', weekday: 'Weekday pattern' }[r.type] + '</td><td>' + SS.esc(describe(r)) + '</td>' +
+      '<td>' + (r.qty === 0 ? 'Closed (0)' : r.qty) + '</td>' +
+      '<td><button class="btn small danger" data-id="' + r.id + '">Delete</button></td></tr>';
+  }).join('') || '<tr><td colspan="4" class="muted">No exceptions. The default quantity applies every day.</td></tr>';
+}
+
+function renderCal() {
+  var s = SS.load(), ca = current(), now = Date.now(), t = SS.today();
+  var y = +month.slice(0, 4), m = +month.slice(5, 7);
+  $('mlabel').textContent = SS.MONTHS[m - 1] + ' ' + y;
+  var first = SS.fmtDate(new Date(y, m - 1, 1));
+  var last = SS.fmtDate(new Date(y, m, 0));
+  var cap = SS.buildCapacity(ca, s.rules, first, last);
+  var html = SS.DAYS.map(function (d) { return '<div class="dow">' + d + '</div>'; }).join('');
+  for (var i = 0; i < SS.weekday(first); i++) { html += '<div class="day blank"></div>'; }
+  SS.eachDate(first, last).forEach(function (d) {
+    var res = SS.reservedFor(s.reservations, ca.id, d, now), rem = cap[d] - res;
+    var cls = 'day' + (cap[d] === 0 ? ' closed' : (rem <= 0 ? ' full' : '')) + (d === t ? ' today' : '');
+    html += '<div class="' + cls + '"><span class="n">' + (+d.slice(8)) + '</span><br>' +
+      cap[d] + ' / ' + res + ' / ' + rem + '</div>';
+  });
+  $('cal').innerHTML = html;
+}
+
+function shiftMonth(n) {
+  var y = +month.slice(0, 4), m = +month.slice(5, 7) - 1 + n;
+  var d = new Date(y, m, 1);
+  month = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2);
+  renderCal();
+}
+$('prev').addEventListener('click', function () { shiftMonth(-1); });
+$('next').addEventListener('click', function () { shiftMonth(1); });
+$('acc').addEventListener('change', function () { SS.flash(msg, '', ''); render(); });
+
+$('xtype').addEventListener('change', function () {
+  var t = $('xtype').value;
+  $('endwrap').hidden = t === 'date';
+  $('dayswrap').hidden = t !== 'weekday';
+});
+$('endwrap').hidden = true;
+
+function conflictsMessage(list) {
+  msg.className = 'msg error'; msg.hidden = false;
+  msg.innerHTML = 'Capacity cannot go below what is already reserved. Conflicting dates:<ul>' +
+    list.slice(0, 10).map(function (c) {
+      return '<li>' + SS.prettyDate(c.date) + ': capacity would be ' + c.capacity + ', reserved ' + c.reserved + '</li>';
+    }).join('') + (list.length > 10 ? '<li>and ' + (list.length - 10) + ' more</li>' : '') + '</ul>';
+}
+
+$('savedef').addEventListener('click', function () {
+  var s = SS.load(), ca = current(), q = parseInt($('defqty').value, 10);
+  if (!(q >= 0)) { SS.flash(msg, 'Quantity must be 0 or more.', 'error'); return; }
+  var c = SS.capacityConflicts(s, ca.id, Object.assign({}, ca, { qty: q }), s.rules, Date.now());
+  if (c.length) { conflictsMessage(c); return; }
+  ca.qty = q; SS.save(); SS.flash(msg, 'Default quantity saved.', 'ok'); render();
+});
+
+$('addx').addEventListener('click', function () {
+  var s = SS.load(), ca = current(), type = $('xtype').value;
+  var start = $('xstart').value, end = type === 'date' ? start : $('xend').value;
+  var qty = parseInt($('xqty').value, 10);
+  var days = Array.prototype.slice.call(document.querySelectorAll('.wd:checked')).map(function (c) { return +c.value; });
+  if (!SS.isDate(start) || !SS.isDate(end)) { SS.flash(msg, 'Enter valid dates.', 'error'); return; }
+  if (end < start) { SS.flash(msg, 'End date must not be before start date.', 'error'); return; }
+  if (!(qty >= 0)) { SS.flash(msg, 'Quantity must be 0 or more.', 'error'); return; }
+  if (type === 'weekday' && !days.length) { SS.flash(msg, 'Pick at least one weekday.', 'error'); return; }
+  var rule = { id: 'rl_' + (++s.nextId), centerAccId: ca.id, type: type, start: start, end: end, days: type === 'weekday' ? days : [], qty: qty };
+  var c = SS.capacityConflicts(s, ca.id, ca, s.rules.concat([rule]), Date.now());
+  if (c.length) { conflictsMessage(c); return; }
+  s.rules.push(rule); SS.save(); SS.flash(msg, 'Exception added.', 'ok'); render();
+});
+
+$('xrows').addEventListener('click', function (e) {
+  var id = e.target.getAttribute('data-id');
+  if (!id) { return; }
+  var s = SS.load(), ca = current();
+  var remaining = s.rules.filter(function (r) { return r.id !== id; });
+  // Removing a closure raises capacity, but removing a raise lowers it: check.
+  var c = SS.capacityConflicts(s, ca.id, ca, remaining, Date.now());
+  if (c.length) { conflictsMessage(c); return; }
+  s.rules = remaining; SS.save(); SS.flash(msg, 'Exception deleted.', 'ok'); render();
+});
+
+fillSelect();
+render();
+</script>
+</body>
+</html>

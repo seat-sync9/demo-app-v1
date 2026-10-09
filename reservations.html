@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reservations - Seat-Sync demo</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main id="main">
+  <h1>Reservations</h1>
+  <div id="msg" role="alert" hidden></div>
+  <div class="tabs" role="tablist">
+    <button type="button" role="tab" id="tab-up" aria-selected="true">Upcoming</button>
+    <button type="button" role="tab" id="tab-past" aria-selected="false">Past</button>
+  </div>
+  <div class="row">
+    <div><label for="fprov">Provider</label><select id="fprov"><option value="">All</option></select></div>
+    <div><label for="fstat">Status</label>
+      <select id="fstat"><option value="">All</option><option>held</option><option>confirmed</option><option>cancelled</option><option>expired</option></select></div>
+    <div><label for="fdate">On date</label><input id="fdate" type="date"></div>
+    <div><button type="button" class="btn small ghost" id="clear">Clear filters</button></div>
+  </div>
+  <div class="table-wrap" style="margin-top:1rem"><table>
+    <thead><tr><th>ID</th><th>Provider</th><th>Accommodation</th><th>Qty</th><th>Dates</th><th>Status</th><th>External ref</th><th></th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table></div>
+  <p class="muted">Candidate data is never shown here: providers only send an opaque external reference.</p>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/app.js"></script>
+<script>
+SS.shell({ page: 'reservations.html', owner: true });
+var center = SS.currentCenter();
+var msg = document.getElementById('msg');
+var $ = function (id) { return document.getElementById(id); };
+var tab = 'up', cancelling = null;
+
+$('fprov').insertAdjacentHTML('beforeend', window.SeatSyncSeed.PROVIDERS.map(function (p) {
+  return '<option value="' + p.id + '">' + SS.esc(p.name) + '</option>';
+}).join(''));
+
+function render() {
+  var s = SS.load(); SS.expireHolds(s);
+  var t = SS.today();
+  var list = s.reservations.filter(function (r) {
+    if (r.centerId !== center.id) { return false; }
+    if (tab === 'up' ? r.end < t : r.end >= t) { return false; }
+    if ($('fprov').value && r.providerId !== $('fprov').value) { return false; }
+    if ($('fstat').value && r.status !== $('fstat').value) { return false; }
+    var d = $('fdate').value;
+    if (d && !(r.start <= d && d <= r.end)) { return false; }
+    return true;
+  }).sort(function (a, b) { return a.start < b.start ? -1 : 1; });
+
+  $('rows').innerHTML = list.map(function (r) {
+    var ca = SS.centerAccById(s, r.centerAccId), p = SS.provider(r.providerId);
+    var canCancel = tab === 'up' && (r.status === 'held' || r.status === 'confirmed');
+    var cell = '';
+    if (cancelling === r.id) {
+      cell = '<label class="sr" for="reason">Reason</label><input id="reason" type="text" placeholder="Reason" style="width:9rem"> ' +
+        '<button class="btn small" data-act="do" data-id="' + r.id + '">Confirm</button> ' +
+        '<button class="btn small ghost" data-act="no">Back</button>';
+    } else if (canCancel) {
+      cell = '<button class="btn small danger" data-act="cancel" data-id="' + r.id + '">Cancel</button>';
+    } else if (r.status === 'cancelled' && r.cancelReason) {
+      cell = '<span class="muted">' + SS.esc(r.cancelReason) + '</span>';
+    }
+    return '<tr><td>' + r.id + '</td><td>' + SS.esc(p ? p.name : r.providerId) + '</td>' +
+      '<td>' + SS.esc(ca ? SS.catalogItem(ca.code).name : '?') + '</td><td>' + r.qty + '</td>' +
+      '<td>' + (r.start === r.end ? r.start : r.start + ' to ' + r.end) + '</td>' +
+      '<td><span class="pill ' + r.status + '">' + r.status + '</span></td>' +
+      '<td><code>' + SS.esc(r.ref) + '</code></td><td>' + cell + '</td></tr>';
+  }).join('') || '<tr><td colspan="8" class="muted">No reservations match.</td></tr>';
+}
+
+function setTab(t) {
+  tab = t; cancelling = null;
+  $('tab-up').setAttribute('aria-selected', t === 'up');
+  $('tab-past').setAttribute('aria-selected', t === 'past');
+  render();
+}
+$('tab-up').addEventListener('click', function () { setTab('up'); });
+$('tab-past').addEventListener('click', function () { setTab('past'); });
+['fprov', 'fstat', 'fdate'].forEach(function (id) { $(id).addEventListener('change', render); });
+$('clear').addEventListener('click', function () { $('fprov').value = ''; $('fstat').value = ''; $('fdate').value = ''; render(); });
+
+$('rows').addEventListener('click', function (e) {
+  var b = e.target.closest('[data-act]');
+  if (!b) { return; }
+  var act = b.getAttribute('data-act'), id = b.getAttribute('data-id');
+  if (act === 'cancel') { cancelling = id; render(); var r = $('reason'); if (r) { r.focus(); } }
+  else if (act === 'no') { cancelling = null; render(); }
+  else if (act === 'do') {
+    var reason = $('reason').value.trim();
+    if (!reason) { SS.flash(msg, 'Please give a reason for cancelling.', 'error'); return; }
+    var res = SS.cancelReservation(id, reason);
+    cancelling = null;
+    SS.flash(msg, res.status === 200 ? 'Reservation ' + id + ' cancelled. Capacity is free again.' : res.body.error.message, res.status === 200 ? 'ok' : 'error');
+    render();
+  }
+});
+render();
+</script>
+</body>
+</html>

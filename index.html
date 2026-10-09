@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seat-Sync demo</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main id="main">
+  <h1>Seat-Sync</h1>
+  <p>Test centers publish accommodation availability. Delivery providers search it and place holds. This is a clickable prototype with sample data.</p>
+  <div class="choices">
+    <a class="card" href="login.html">
+      <strong>I'm a test center owner</strong>
+      <span class="muted">Manage accommodations, availability, providers and reservations.</span>
+    </a>
+    <a class="card" href="api-explorer.html">
+      <strong>I'm a delivery provider</strong>
+      <span class="muted">Try the availability API: search, place holds, confirm.</span>
+    </a>
+  </div>
+  <p class="muted"><a href="engine-tests.html">Engine checks</a> (availability logic tests)</p>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/app.js"></script>
+<script>SS.shell({ page: 'index.html', owner: false });</script>
+</body>
+</html>

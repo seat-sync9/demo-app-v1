@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engine checks - Seat-Sync demo</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main id="main">
+  <h1>Availability engine checks</h1>
+  <p class="muted">Run against a throwaway state. Your demo data is not touched.</p>
+  <ul id="out"></ul>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/app.js"></script>
+<script>
+SS.shell({ page: 'engine-tests.html', owner: false });
+var out = document.getElementById('out');
+function check(name, ok) {
+  out.insertAdjacentHTML('beforeend', '<li><span class="pill ' + (ok ? 'confirmed' : 'cancelled') + '">' + (ok ? 'pass' : 'FAIL') + '</span> ' + SS.esc(name) + '</li>');
+}
+var T = '2030-01-07'; // a Monday
+var now = 1000000;
+var ca = { id: 'x', centerId: 'c', code: 'private-room', qty: 3, active: true };
+function rule(type, start, end, days, qty) { return { id: 'r' + Math.random(), centerAccId: 'x', type: type, start: start, end: end, days: days || [], qty: qty }; }
+var state = function (rules, res) { return { centers: [{ id: 'c', postal: '97000' }], centerAccs: [ca], rules: rules, approvals: [{ centerId: 'c', providerId: 'p' }], reservations: res || [] }; };
+
+var cap = SS.buildCapacity(ca, [], T, SS.addDays(T, 2));
+check('default capacity applies', cap[T] === 3 && cap[SS.addDays(T, 2)] === 3);
+
+cap = SS.buildCapacity(ca, [rule('range', T, SS.addDays(T, 5), [], 2), rule('date', SS.addDays(T, 1), SS.addDays(T, 1), [], 0)], T, SS.addDays(T, 2));
+check('single date beats range, range beats default', cap[T] === 2 && cap[SS.addDays(T, 1)] === 0);
+
+cap = SS.buildCapacity(ca, [rule('weekday', T, SS.addDays(T, 13), [6, 0], 0)], T, SS.addDays(T, 6));
+check('weekday pattern closes Sat/Sun only', cap[SS.addDays(T, 5)] === 0 && cap[SS.addDays(T, 4)] === 3);
+
+check('weekday() is local, not UTC', SS.weekday('2030-01-07') === 1 && SS.addDays('2030-03-09', 1) === '2030-03-10');
+
+var res = [
+  { id: 'a', centerAccId: 'x', qty: 2, start: T, end: T, status: 'confirmed', expiresAt: null },
+  { id: 'b', centerAccId: 'x', qty: 1, start: T, end: T, status: 'held', expiresAt: now + 500 },
+  { id: 'c', centerAccId: 'x', qty: 1, start: T, end: T, status: 'held', expiresAt: now - 500 },
+  { id: 'd', centerAccId: 'x', qty: 1, start: T, end: T, status: 'cancelled', expiresAt: null }
+];
+check('reserved counts confirmed + live holds only', SS.reservedFor(res, 'x', T, now) === 3);
+
+var s = state([], res);
+check('canFit false when window minimum too low', SS.canFit(s, 'x', T, SS.addDays(T, 1), 1, now) === false);
+check('canFit true on a free day', SS.canFit(s, 'x', SS.addDays(T, 1), SS.addDays(T, 2), 3, now) === true);
+check('canFit uses minimum across window', SS.canFit(s, 'x', T, SS.addDays(T, 2), 1, now) === false);
+
+check('search returns approved provider', SS.searchCenters(s, 'p', [{ code: 'private-room', qty: 1 }], SS.addDays(T, 1), SS.addDays(T, 1), '', now).length === 1);
+check('search hides center from unapproved provider', SS.searchCenters(s, 'other', [{ code: 'private-room', qty: 1 }], SS.addDays(T, 1), SS.addDays(T, 1), '', now).length === 0);
+check('search honors postal prefix', SS.searchCenters(s, 'p', [{ code: 'private-room', qty: 1 }], SS.addDays(T, 1), SS.addDays(T, 1), '75', now).length === 0);
+
+var conflicts = SS.capacityConflicts(s, 'x', Object.assign({}, ca, { qty: 1 }), [], now);
+check('lowering capacity below reserved reports the date', conflicts.length === 1 && conflicts[0].date === T);
+</script>
+</body>
+</html>

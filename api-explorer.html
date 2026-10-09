@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>API explorer - Seat-Sync demo</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main id="main">
+  <h1>Provider API explorer</h1>
+  <p class="muted">Shows what the real API would return, computed from the same sample data the owner screens edit. Holds placed here appear in the owner's Reservations.</p>
+
+  <div class="card">
+    <div class="row">
+      <div><label for="prov">Provider identity</label><select id="prov"></select></div>
+      <div><label for="ep">Endpoint</label>
+        <select id="ep">
+          <option value="centers">GET /v1/centers</option>
+          <option value="avail">GET /v1/centers/{id}/availability</option>
+          <option value="search">GET /v1/availability/search</option>
+          <option value="hold">POST /v1/holds (place hold)</option>
+          <option value="confirm">POST /v1/holds/{id}/confirm</option>
+          <option value="cancel">DELETE /v1/reservations/{id}</option>
+        </select></div>
+    </div>
+
+    <div class="row" id="g-center">
+      <div><label for="center">Center</label><select id="center"></select></div>
+    </div>
+    <div class="row" id="g-dates">
+      <div><label for="from">Start date</label><input id="from" type="date"></div>
+      <div><label for="to">End date</label><input id="to" type="date"></div>
+      <div id="g-postal"><label for="postal">Postal code prefix (optional)</label><input id="postal" type="text" placeholder="e.g. 97"></div>
+    </div>
+    <div id="g-needs">
+      <label for="needcode">Accommodations</label>
+      <div class="row">
+        <div><select id="needcode"></select></div>
+        <div><input id="needqty" type="number" min="1" value="1" style="width:5rem" aria-label="Quantity"></div>
+        <div><button type="button" class="btn small ghost" id="addneed">Add</button></div>
+      </div>
+      <div class="chips" id="chips" aria-live="polite"></div>
+    </div>
+    <div class="row" id="g-res">
+      <div><label for="resid">Reservation</label><select id="resid"></select></div>
+    </div>
+
+    <p><button type="button" class="btn" id="send">Send</button></p>
+  </div>
+
+  <h2>Request</h2>
+  <pre class="json" id="req">Press Send.</pre>
+  <h2>Response <span id="status" class="pill"></span></h2>
+  <pre class="json" id="resp"></pre>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/app.js"></script>
+<script>
+SS.shell({ page: 'api-explorer.html', owner: false });
+var $ = function (id) { return document.getElementById(id); };
+var needs = [];
+var s0 = SS.load();
+
+$('prov').innerHTML = window.SeatSyncSeed.PROVIDERS.map(function (p) {
+  return '<option value="' + p.id + '">' + SS.esc(p.name) + '</option>';
+}).join('');
+// All centers are listed (even unapproved ones) so deny-by-default can be demonstrated.
+$('center').innerHTML = s0.centers.map(function (c) {
+  return '<option value="' + c.id + '">' + SS.esc(c.name) + ' (' + c.id + ')</option>';
+}).join('');
+$('needcode').innerHTML = window.SeatSyncSeed.CATALOG.map(function (c) {
+  return '<option value="' + c.code + '">' + SS.esc(c.name) + '</option>';
+}).join('');
+$('from').value = SS.addDays(SS.today(), 2);
+$('to').value = SS.addDays(SS.today(), 2);
+needs = [{ code: 'private-room', qty: 1 }];
+
+function renderNeeds() {
+  $('chips').innerHTML = needs.map(function (n, i) {
+    return '<span class="chip">' + SS.esc(SS.catalogItem(n.code).name) + ' &times; ' + n.qty +
+      '<button type="button" data-i="' + i + '" aria-label="Remove ' + SS.esc(n.code) + '">&times;</button></span>';
+  }).join('') || '<span class="muted">None added.</span>';
+}
+$('addneed').addEventListener('click', function () {
+  var code = $('needcode').value, qty = Math.max(1, parseInt($('needqty').value, 10) || 1);
+  var ex = needs.filter(function (n) { return n.code === code; })[0];
+  if (ex) { ex.qty = qty; } else { needs.push({ code: code, qty: qty }); }
+  renderNeeds();
+});
+$('chips').addEventListener('click', function (e) {
+  var i = e.target.getAttribute('data-i');
+  if (i !== null) { needs.splice(+i, 1); renderNeeds(); }
+});
+
+function myReservations() {
+  var s = SS.load(); SS.expireHolds(s);
+  return s.reservations.filter(function (r) { return r.providerId === $('prov').value; })
+    .sort(function (a, b) { return a.id < b.id ? 1 : -1; });
+}
+function renderRes() {
+  $('resid').innerHTML = myReservations().map(function (r) {
+    return '<option value="' + r.id + '">' + r.id + ' - ' + r.status + ' - ' + r.start + '</option>';
+  }).join('') || '<option value="">None for this provider</option>';
+}
+
+function layout() {
+  var ep = $('ep').value;
+  $('g-center').hidden = !(ep === 'avail' || ep === 'hold');
+  $('g-dates').hidden = !(ep === 'avail' || ep === 'search' || ep === 'hold');
+  $('g-postal').hidden = ep !== 'search';
+  $('g-needs').hidden = !(ep === 'avail' || ep === 'search' || ep === 'hold');
+  $('g-res').hidden = !(ep === 'confirm' || ep === 'cancel');
+  if (!$('g-res').hidden) { renderRes(); }
+}
+$('ep').addEventListener('change', layout);
+$('prov').addEventListener('change', layout);
+
+function needsParam() { return needs.map(function (n) { return n.code + ':' + n.qty; }).join(','); }
+
+$('send').addEventListener('click', function () {
+  var ep = $('ep').value, req, url, shownBody = null;
+  var from = $('from').value, to = $('to').value;
+  if (ep === 'centers') {
+    req = { method: 'GET', path: '/v1/centers' }; url = req.path;
+  } else if (ep === 'avail') {
+    req = { method: 'GET', path: '/v1/centers/' + $('center').value + '/availability', query: { from: from, to: to, accommodations: needs } };
+    url = req.path + '?from=' + from + '&to=' + to + '&accommodations=' + needsParam();
+  } else if (ep === 'search') {
+    req = { method: 'GET', path: '/v1/availability/search', query: { start: from, end: to, needs: needs, postal: $('postal').value.trim() } };
+    url = req.path + '?start=' + from + '&end=' + to + '&needs=' + needsParam() + ($('postal').value.trim() ? '&postal=' + encodeURIComponent($('postal').value.trim()) : '');
+  } else if (ep === 'hold') {
+    shownBody = { center_id: $('center').value, start_date: from, end_date: to, accommodations: needs };
+    req = { method: 'POST', path: '/v1/holds', body: shownBody }; url = req.path;
+  } else if (ep === 'confirm') {
+    req = { method: 'POST', path: '/v1/holds/' + $('resid').value + '/confirm' }; url = req.path;
+  } else {
+    req = { method: 'DELETE', path: '/v1/reservations/' + $('resid').value }; url = req.path;
+  }
+  var p = SS.provider($('prov').value);
+  $('req').textContent = req.method + ' ' + url + '\nAuthorization: Bearer ' + p.apiKey +
+    (shownBody ? '\nContent-Type: application/json\n\n' + JSON.stringify(shownBody, null, 2) : '');
+  var out = SS.api($('prov').value, req);
+  $('resp').textContent = JSON.stringify(out.body, null, 2);
+  $('status').textContent = out.status;
+  $('status').className = 'pill ' + (out.status < 300 ? 'confirmed' : 'cancelled');
+  renderRes();
+});
+
+renderNeeds();
+layout();
+</script>
+</body>
+</html>

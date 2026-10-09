@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Log in - Seat-Sync demo</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main id="main">
+  <h1>Owner log in</h1>
+  <div class="card">
+    <form id="f" novalidate>
+      <label for="email">Email</label>
+      <input id="email" type="email" autocomplete="username" required>
+      <label for="pw">Password</label>
+      <input id="pw" type="password" autocomplete="current-password" required>
+      <p><button class="btn" type="submit">Log in</button></p>
+      <div id="msg" role="alert" hidden></div>
+    </form>
+  </div>
+  <div class="card">
+    <strong>Demo accounts</strong> (any password works in demo mode)
+    <div class="table-wrap"><table>
+      <thead><tr><th>Center</th><th>Email</th><th></th></tr></thead>
+      <tbody id="accts"></tbody>
+    </table></div>
+  </div>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/app.js"></script>
+<script>
+SS.shell({ page: 'login.html', owner: false });
+var s = SS.load();
+document.getElementById('accts').innerHTML = s.centers.map(function (c) {
+  return '<tr><td>' + SS.esc(c.name) + '</td><td><code>' + SS.esc(c.email) + '</code></td>' +
+    '<td><button type="button" class="btn small ghost" data-email="' + SS.esc(c.email) + '">Use</button></td></tr>';
+}).join('');
+document.getElementById('accts').addEventListener('click', function (e) {
+  var em = e.target.getAttribute('data-email');
+  if (em) { document.getElementById('email').value = em; document.getElementById('pw').value = 'demo'; document.getElementById('pw').focus(); }
+});
+document.getElementById('f').addEventListener('submit', function (e) {
+  e.preventDefault();
+  var r = SS.login(document.getElementById('email').value, document.getElementById('pw').value);
+  if (r.ok) { location.href = 'accommodations.html'; }
+  else { SS.flash(document.getElementById('msg'), r.message, 'error'); }
+});
+</script>
+</body>
+</html>
