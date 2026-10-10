@@ -312,6 +312,7 @@
   /* ---------------------------------------------------------------- page shell */
   var OWNER_NAV = [
     ['accommodations.html', 'Accommodations'],
+    ['center-accommodations.html', 'Center Accommodations'],
     ['availability.html', 'Availability'],
     ['reservations.html', 'Reservations'],
     ['providers.html', 'Providers']

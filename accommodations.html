@@ -9,22 +9,21 @@
 <body>
 <main id="main">
   <h1>Accommodations</h1>
+  <p class="muted">The catalog of all generally available accommodations. Add the ones your center supports; they then appear under <a href="center-accommodations.html">Center Accommodations</a>, where you set quantities and notes.</p>
   <div id="msg" role="alert" hidden></div>
-  <div class="card">
-    <h2 style="margin-top:0">Add from catalog</h2>
-    <div class="row">
-      <div><label for="filter">Search</label><input id="filter" type="search" placeholder="e.g. room"></div>
-      <div><label for="catalog">Accommodation</label><select id="catalog"></select></div>
-      <div><label for="newqty">Default quantity</label><input id="newqty" type="number" min="1" value="1" style="width:6rem"></div>
-      <div><button type="button" class="btn" id="add">Add</button></div>
-    </div>
+  <div class="row">
+    <div><label for="filter">Search</label><input id="filter" type="search" placeholder="e.g. room"></div>
+    <div><label for="cat">Category</label><select id="cat"><option value="">All</option></select></div>
+    <div><label for="show">Show</label>
+      <select id="show"><option value="">All</option><option value="added">In my center</option><option value="not">Not in my center</option></select></div>
   </div>
-  <div class="table-wrap">
+  <div class="table-wrap" style="margin-top:1rem">
     <table>
-      <thead><tr><th><span class="sr">Fav</span>★</th><th>Name</th><th>Category</th><th>Kind</th><th>Default qty</th><th>Notes</th><th>Active</th><th>Actions</th></tr></thead>
+      <thead><tr><th>Name</th><th>Category</th><th>Kind</th><th>My center</th><th></th></tr></thead>
       <tbody id="rows"></tbody>
     </table>
   </div>
+  <p class="muted" id="count" aria-live="polite"></p>
 </main>
 <script src="assets/data.js"></script>
 <script src="assets/app.js"></script>
@@ -32,120 +31,48 @@
 SS.shell({ page: 'accommodations.html', owner: true });
 var center = SS.currentCenter();
 var msg = document.getElementById('msg');
-var editing = null;
+var $ = function (id) { return document.getElementById(id); };
+var catalog = window.SeatSyncSeed.CATALOG;
 
-function upcomingFor(caId) {
-  var s = SS.load(), t = SS.today(), now = Date.now();
-  return s.reservations.filter(function (r) {
-    return r.centerAccId === caId && SS.isActiveReservation(r, now) && r.end >= t;
-  });
-}
-
-function renderCatalog() {
-  var s = SS.load(), have = {}, q = document.getElementById('filter').value.toLowerCase();
-  SS.centerAccsFor(s, center.id).forEach(function (c) { have[c.code] = true; });
-  var groups = {};
-  window.SeatSyncSeed.CATALOG.forEach(function (it) {
-    if (have[it.code]) { return; }
-    if (q && (it.name + ' ' + it.category).toLowerCase().indexOf(q) < 0) { return; }
-    (groups[it.category] = groups[it.category] || []).push(it);
-  });
-  var html = '';
-  Object.keys(groups).forEach(function (cat) {
-    html += '<optgroup label="' + SS.esc(cat) + '">' + groups[cat].map(function (it) {
-      return '<option value="' + it.code + '">' + SS.esc(it.name) + ' (' + it.kind + ')</option>';
-    }).join('') + '</optgroup>';
-  });
-  document.getElementById('catalog').innerHTML = html || '<option value="">No matches</option>';
-}
+var cats = [];
+catalog.forEach(function (c) { if (cats.indexOf(c.category) < 0) { cats.push(c.category); } });
+$('cat').insertAdjacentHTML('beforeend', cats.map(function (c) {
+  return '<option>' + SS.esc(c) + '</option>';
+}).join(''));
 
 function render() {
-  var s = SS.load();
-  var rows = SS.centerAccsFor(s, center.id).map(function (ca) {
-    var it = SS.catalogItem(ca.code);
-    if (editing === ca.id) {
-      return '<tr><td></td><td>' + SS.esc(it.name) + '</td><td>' + SS.esc(it.category) + '</td><td>' + it.kind + '</td>' +
-        '<td><input type="number" min="0" id="e-qty" value="' + ca.qty + '" style="width:5rem" aria-label="Default quantity"></td>' +
-        '<td><input type="text" id="e-notes" value="' + SS.esc(ca.notes) + '" aria-label="Notes"></td><td></td>' +
-        '<td><button class="btn small" data-act="save" data-id="' + ca.id + '">Save</button> ' +
-        '<button class="btn small ghost" data-act="cancel">Cancel</button></td></tr>';
-    }
-    return '<tr><td><button class="star" data-act="fav" data-id="' + ca.id + '" aria-pressed="' + ca.fav + '" aria-label="Favorite ' + SS.esc(it.name) + '">' + (ca.fav ? '★' : '☆') + '</button></td>' +
-      '<td>' + SS.esc(it.name) + '</td><td>' + SS.esc(it.category) + '</td><td>' + it.kind + '</td><td>' + ca.qty + '</td>' +
-      '<td>' + SS.esc(ca.notes) + '</td>' +
-      '<td><label class="inline-check"><input type="checkbox" data-act="active" data-id="' + ca.id + '"' + (ca.active ? ' checked' : '') + '> ' + (ca.active ? 'Active' : 'Inactive') + '</label></td>' +
-      '<td><button class="btn small ghost" data-act="edit" data-id="' + ca.id + '">Edit</button> ' +
-      '<button class="btn small danger" data-act="remove" data-id="' + ca.id + '">Remove</button></td></tr>';
+  var s = SS.load(), have = {}, q = $('filter').value.toLowerCase();
+  SS.centerAccsFor(s, center.id).forEach(function (c) { have[c.code] = c; });
+  var list = catalog.filter(function (it) {
+    if (q && (it.name + ' ' + it.category).toLowerCase().indexOf(q) < 0) { return false; }
+    if ($('cat').value && it.category !== $('cat').value) { return false; }
+    if ($('show').value === 'added' && !have[it.code]) { return false; }
+    if ($('show').value === 'not' && have[it.code]) { return false; }
+    return true;
   });
-  document.getElementById('rows').innerHTML = rows.join('') || '<tr><td colspan="8" class="muted">No accommodations yet.</td></tr>';
-  renderCatalog();
+  $('rows').innerHTML = list.map(function (it) {
+    var h = have[it.code];
+    return '<tr><td>' + SS.esc(it.name) + '</td><td>' + SS.esc(it.category) + '</td><td>' + it.kind + '</td>' +
+      '<td>' + (h ? '<span class="pill ' + (h.active ? 'active' : 'inactive') + '">' + (h.active ? 'In my center' : 'In my center (inactive)') + '</span>' : '<span class="muted">Not added</span>') + '</td>' +
+      '<td>' + (h ? '' : '<button class="btn small" data-code="' + it.code + '">Add to my center</button>') + '</td></tr>';
+  }).join('') || '<tr><td colspan="5" class="muted">No accommodations match.</td></tr>';
+  $('count').textContent = list.length + ' of ' + catalog.length + ' catalog items shown. ' +
+    Object.keys(have).length + ' supported by this center.';
 }
 
-document.getElementById('filter').addEventListener('input', renderCatalog);
+['filter', 'cat', 'show'].forEach(function (id) { $(id).addEventListener('input', render); });
 
-document.getElementById('add').addEventListener('click', function () {
-  var code = document.getElementById('catalog').value;
-  var qty = parseInt(document.getElementById('newqty').value, 10);
-  if (!code) { SS.flash(msg, 'Choose an accommodation to add.', 'error'); return; }
-  if (!(qty >= 1)) { SS.flash(msg, 'Quantity must be at least 1.', 'error'); return; }
+$('rows').addEventListener('click', function (e) {
+  var code = e.target.getAttribute('data-code');
+  if (!code) { return; }
   var s = SS.load();
-  s.centerAccs.push({ id: 'ca_' + (++s.nextId), centerId: center.id, code: code, qty: qty, notes: '', fav: false, active: true });
+  s.nextId += 1;
+  s.centerAccs.push({ id: 'ca_' + s.nextId, centerId: center.id, code: code, qty: 1, notes: '', fav: false, active: true });
   SS.save();
-  SS.flash(msg, SS.catalogItem(code).name + ' added.', 'ok');
+  msg.className = 'msg ok'; msg.hidden = false;
+  msg.innerHTML = SS.esc(SS.catalogItem(code).name) + ' added with quantity 1. Set the quantity in <a href="center-accommodations.html">Center Accommodations</a>.';
   render();
 });
-
-document.getElementById('rows').addEventListener('click', function (e) {
-  var b = e.target.closest('[data-act]');
-  if (!b) { return; }
-  var act = b.getAttribute('data-act'), id = b.getAttribute('data-id');
-  var s = SS.load(), ca = id ? SS.centerAccById(s, id) : null;
-  if (act === 'fav') { ca.fav = !ca.fav; SS.save(); render(); }
-  else if (act === 'edit') { editing = id; render(); }
-  else if (act === 'cancel') { editing = null; render(); }
-  else if (act === 'save') {
-    var qty = parseInt(document.getElementById('e-qty').value, 10);
-    if (!(qty >= 0)) { SS.flash(msg, 'Quantity must be 0 or more.', 'error'); return; }
-    var proposed = Object.assign({}, ca, { qty: qty });
-    var conflicts = SS.capacityConflicts(s, ca.id, proposed, s.rules, Date.now());
-    if (conflicts.length) { showConflicts(conflicts); return; }
-    ca.qty = qty; ca.notes = document.getElementById('e-notes').value;
-    editing = null; SS.save(); SS.flash(msg, 'Saved.', 'ok'); render();
-  }
-  else if (act === 'remove') {
-    var up = upcomingFor(id);
-    if (up.length) {
-      SS.flash(msg, 'Cannot remove ' + SS.catalogItem(ca.code).name + ': it has ' + up.length +
-        ' upcoming reservation(s) (' + up.map(function (r) { return r.id; }).join(', ') + '). Cancel them first.', 'error');
-      return;
-    }
-    s.centerAccs = s.centerAccs.filter(function (c) { return c.id !== id; });
-    s.rules = s.rules.filter(function (r) { return r.centerAccId !== id; });
-    SS.save(); SS.flash(msg, 'Removed.', 'ok'); render();
-  }
-});
-
-document.getElementById('rows').addEventListener('change', function (e) {
-  if (e.target.getAttribute('data-act') !== 'active') { return; }
-  var s = SS.load(), ca = SS.centerAccById(s, e.target.getAttribute('data-id'));
-  if (!e.target.checked) {
-    var up = upcomingFor(ca.id);
-    if (up.length) {
-      e.target.checked = true;
-      SS.flash(msg, 'Cannot deactivate: ' + up.length + ' upcoming reservation(s) depend on it.', 'error');
-      return;
-    }
-  }
-  ca.active = e.target.checked; SS.save(); render();
-});
-
-function showConflicts(list) {
-  msg.className = 'msg error'; msg.hidden = false;
-  msg.innerHTML = 'Capacity cannot go below what is already reserved. Conflicting dates:<ul>' +
-    list.slice(0, 8).map(function (c) {
-      return '<li>' + SS.prettyDate(c.date) + ': capacity ' + c.capacity + ', reserved ' + c.reserved + '</li>';
-    }).join('') + '</ul>';
-}
 
 render();
 </script>

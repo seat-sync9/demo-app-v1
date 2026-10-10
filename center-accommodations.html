@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Center Accommodations - Seat-Sync demo</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<main id="main">
+  <h1>Center Accommodations</h1>
+  <p class="muted">What <strong id="cname"></strong> actively supports. These are the accommodations providers can search and reserve. To support something new, add it from the <a href="accommodations.html">Accommodations catalog</a>.</p>
+  <div id="msg" role="alert" hidden></div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th><span class="sr">Favorite</span>★</th><th>Name</th><th>Category</th><th>Kind</th><th>Default qty</th><th>Notes</th><th>Active</th><th>Actions</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+</main>
+<script src="assets/data.js"></script>
+<script src="assets/app.js"></script>
+<script>
+SS.shell({ page: 'center-accommodations.html', owner: true });
+var center = SS.currentCenter();
+var msg = document.getElementById('msg');
+var editing = null;
+document.getElementById('cname').textContent = center.name;
+
+function upcomingFor(caId) {
+  var s = SS.load(), t = SS.today(), now = Date.now();
+  return s.reservations.filter(function (r) {
+    return r.centerAccId === caId && SS.isActiveReservation(r, now) && r.end >= t;
+  });
+}
+
+function render() {
+  var s = SS.load();
+  var rows = SS.centerAccsFor(s, center.id).map(function (ca) {
+    var it = SS.catalogItem(ca.code);
+    if (editing === ca.id) {
+      return '<tr><td></td><td>' + SS.esc(it.name) + '</td><td>' + SS.esc(it.category) + '</td><td>' + it.kind + '</td>' +
+        '<td><input type="number" min="0" id="e-qty" value="' + ca.qty + '" style="width:5rem" aria-label="Default quantity"></td>' +
+        '<td><input type="text" id="e-notes" value="' + SS.esc(ca.notes) + '" aria-label="Notes"></td><td></td>' +
+        '<td><button class="btn small" data-act="save" data-id="' + ca.id + '">Save</button> ' +
+        '<button class="btn small ghost" data-act="cancel">Cancel</button></td></tr>';
+    }
+    return '<tr><td><button class="star" data-act="fav" data-id="' + ca.id + '" aria-pressed="' + ca.fav + '" aria-label="Favorite ' + SS.esc(it.name) + '">' + (ca.fav ? '★' : '☆') + '</button></td>' +
+      '<td>' + SS.esc(it.name) + '</td><td>' + SS.esc(it.category) + '</td><td>' + it.kind + '</td><td>' + ca.qty + '</td>' +
+      '<td>' + SS.esc(ca.notes) + '</td>' +
+      '<td><label class="inline-check"><input type="checkbox" data-act="active" data-id="' + ca.id + '"' + (ca.active ? ' checked' : '') + '> ' + (ca.active ? 'Active' : 'Inactive') + '</label></td>' +
+      '<td><button class="btn small ghost" data-act="edit" data-id="' + ca.id + '">Edit</button> ' +
+      '<button class="btn small danger" data-act="remove" data-id="' + ca.id + '">Remove</button></td></tr>';
+  });
+  document.getElementById('rows').innerHTML = rows.join('') ||
+    '<tr><td colspan="8" class="muted">Nothing yet. Add accommodations from the <a href="accommodations.html">catalog</a>.</td></tr>';
+}
+
+document.getElementById('rows').addEventListener('click', function (e) {
+  var b = e.target.closest('[data-act]');
+  if (!b) { return; }
+  var act = b.getAttribute('data-act'), id = b.getAttribute('data-id');
+  var s = SS.load(), ca = id ? SS.centerAccById(s, id) : null;
+  if (act === 'fav') { ca.fav = !ca.fav; SS.save(); render(); }
+  else if (act === 'edit') { editing = id; render(); }
+  else if (act === 'cancel') { editing = null; render(); }
+  else if (act === 'save') {
+    var qty = parseInt(document.getElementById('e-qty').value, 10);
+    if (!(qty >= 0)) { SS.flash(msg, 'Quantity must be 0 or more.', 'error'); return; }
+    var proposed = Object.assign({}, ca, { qty: qty });
+    var conflicts = SS.capacityConflicts(s, ca.id, proposed, s.rules, Date.now());
+    if (conflicts.length) { showConflicts(conflicts); return; }
+    ca.qty = qty; ca.notes = document.getElementById('e-notes').value;
+    editing = null; SS.save(); SS.flash(msg, 'Saved.', 'ok'); render();
+  }
+  else if (act === 'remove') {
+    var up = upcomingFor(id);
+    if (up.length) {
+      SS.flash(msg, 'Cannot remove ' + SS.catalogItem(ca.code).name + ': it has ' + up.length +
+        ' upcoming reservation(s) (' + up.map(function (r) { return r.id; }).join(', ') + '). Cancel them first.', 'error');
+      return;
+    }
+    s.centerAccs = s.centerAccs.filter(function (c) { return c.id !== id; });
+    s.rules = s.rules.filter(function (r) { return r.centerAccId !== id; });
+    SS.save(); SS.flash(msg, 'Removed from your center. It is still in the catalog.', 'ok'); render();
+  }
+});
+
+document.getElementById('rows').addEventListener('change', function (e) {
+  if (e.target.getAttribute('data-act') !== 'active') { return; }
+  var s = SS.load(), ca = SS.centerAccById(s, e.target.getAttribute('data-id'));
+  if (!e.target.checked) {
+    var up = upcomingFor(ca.id);
+    if (up.length) {
+      e.target.checked = true;
+      SS.flash(msg, 'Cannot deactivate: ' + up.length + ' upcoming reservation(s) depend on it.', 'error');
+      return;
+    }
+  }
+  ca.active = e.target.checked; SS.save(); render();
+});
+
+function showConflicts(list) {
+  msg.className = 'msg error'; msg.hidden = false;
+  msg.innerHTML = 'Capacity cannot go below what is already reserved. Conflicting dates:<ul>' +
+    list.slice(0, 8).map(function (c) {
+      return '<li>' + SS.prettyDate(c.date) + ': capacity ' + c.capacity + ', reserved ' + c.reserved + '</li>';
+    }).join('') + '</ul>';
+}
+
+render();
+</script>
+</body>
+</html>
